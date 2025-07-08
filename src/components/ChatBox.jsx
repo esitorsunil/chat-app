@@ -1,4 +1,4 @@
-// ✅ ChatBox.jsx with Today/Yesterday Grouping (Messages Stacked Vertically)
+// ChatBox.jsx (with Jitsi Meet Integration in Modal)
 import React, { useRef, useEffect, useState } from 'react';
 import moment from 'moment';
 import {
@@ -24,6 +24,7 @@ export default function ChatBox({
   const messagesEndRef = useRef();
   const [editId, setEditId] = useState(null);
   const [editText, setEditText] = useState('');
+  const [showJitsi, setShowJitsi] = useState(false);
 
   useEffect(() => {
     setTimeout(() => {
@@ -74,23 +75,28 @@ export default function ChatBox({
 
   return (
     <>
-      <div className="d-flex align-items-center border-bottom px-3 py-2 bg-light">
-        <img
-          src={selectedUser.imageURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}
-          className="rounded-circle me-2"
-          style={{ height: '40px', width: '40px', objectFit: 'cover' }}
-          alt="chat-user"
-        />
-        <div>
-          <strong>{selectedUser.name}</strong>
-          <div className="text-muted small">
-            {otherTyping
-              ? 'Typing...'
-              : userStatuses[selectedUser.uid] === 'online'
-              ? 'Online'
-              : `Last seen ${moment(selectedUser.lastActive?.toDate()).fromNow()}`}
+      <div className="d-flex align-items-center border-bottom px-3 py-2 bg-light justify-content-between">
+        <div className="d-flex align-items-center">
+          <img
+            src={selectedUser.imageURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}
+            className="rounded-circle me-2"
+            style={{ height: '40px', width: '40px', objectFit: 'cover' }}
+            alt="chat-user"
+          />
+          <div>
+            <strong>{selectedUser.name}</strong>
+            <div className="text-muted small">
+              {otherTyping
+                ? 'Typing...'
+                : userStatuses[selectedUser.uid] === 'online'
+                ? 'Online'
+                : `Last seen ${moment(selectedUser.lastActive?.toDate()).fromNow()}`}
+            </div>
           </div>
         </div>
+        <button className="btn btn-outline-primary btn-sm" onClick={() => setShowJitsi(true)}>
+          <i className="bi bi-camera-video"></i> Call
+        </button>
       </div>
 
       <div className="flex-fill p-3 overflow-auto" style={{ backgroundColor: '#e9ecef' }}>
@@ -153,7 +159,7 @@ export default function ChatBox({
                             <div className="d-flex align-items-start justify-content-between gap-2 message-wrapper">
                               <div>{msg.text}</div>
                               {isOwn && (
-                                <div className="dropdown  menu-icon">
+                                <div className="dropdown menu-icon">
                                   <i
                                     className="bi bi-three-dots-vertical text-muted"
                                     style={{ cursor: 'pointer', fontSize: '1rem' }}
@@ -220,6 +226,28 @@ export default function ChatBox({
           Send
         </button>
       </div>
+
+      {showJitsi && (
+        <div
+          className="position-fixed top-0 start-0 w-100 h-100 bg-dark bg-opacity-75 d-flex justify-content-center align-items-center"
+          style={{ zIndex: 9999 }}
+        >
+          <div className="bg-white rounded shadow p-2 position-relative" style={{ width: '90%', height: '80%' }}>
+            <button
+              className="btn btn-danger position-absolute top-0 end-0 m-2"
+              onClick={() => setShowJitsi(false)}
+            >
+              Close
+            </button>
+            <iframe
+              src={`https://meet.jit.si/${getChatId(currentUser.uid, selectedUser.uid)}`}
+              allow="camera; microphone; fullscreen; display-capture"
+              style={{ width: '100%', height: '100%', border: 'none' }}
+              title="Video Call"
+            ></iframe>
+          </div>
+        </div>
+      )}
     </>
   );
 }

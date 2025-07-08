@@ -30,6 +30,31 @@ export default function ChatPage() {
   const [otherTyping, setOtherTyping] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [userStatuses, setUserStatuses] = useState({});
+  const [lastMessages, setLastMessages] = useState({});
+
+useEffect(() => {
+  if (!currentUser) return;
+
+  const unsub = onSnapshot(collection(db, 'chats'), (snapshot) => {
+    const lastMsgs = {};
+    snapshot.forEach(async (docSnap) => {
+      const chatId = docSnap.id;
+      const [uid1, uid2] = chatId.split('_');
+      if (![uid1, uid2].includes(currentUser.uid)) return;
+
+      const otherUid = uid1 === currentUser.uid ? uid2 : uid1;
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      const q = query(messagesRef, orderBy('timestamp', 'desc'));
+      const msgSnap = await getDocs(q);
+      const last = msgSnap.docs[0]?.data();
+      if (last) lastMsgs[otherUid] = last;
+    });
+    setLastMessages(lastMsgs);
+  });
+
+  return unsub;
+}, [currentUser]);
+
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -195,12 +220,15 @@ export default function ChatPage() {
   return (
     <div className="d-flex" style={{ height: '100vh' }}>
       <Sidebar
-        users={filteredUsers}
-        search={search}
-        setSearch={setSearch}
-        handleLogout={handleLogout}
-        setSelectedUser={setSelectedUser}
-      />
+  users={filteredUsers}
+  search={search}
+  setSearch={setSearch}
+  handleLogout={handleLogout}
+  setSelectedUser={setSelectedUser}
+  currentUser={currentUser}
+  unreadCounts={unreadCounts}
+/>
+
       <div className="flex-fill d-flex flex-column">
         <ChatBox
           selectedUser={selectedUser}

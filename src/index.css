@@ -12,3 +12,12 @@
   visibility: visible;
   opacity: 1;
 }
+
+.hover-bg:hover {
+  background-color: #f1f1f1;
+}
+
+.sidebar-scroll {
+  overflow-y: auto;
+  max-height: calc(100vh - 60px);
+}
