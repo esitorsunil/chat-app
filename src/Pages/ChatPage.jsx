@@ -1,5 +1,4 @@
-// src/pages/ChatPage.jsx
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { auth, db } from '../utils/firebase';
 import {
   collection,
@@ -11,12 +10,14 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
-  Timestamp
+  Timestamp,
 } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { toast } from 'react-toastify';
-import { useNavigate } from 'react-router-dom';
 import moment from 'moment';
+
+import Sidebar from '../components/Sidebar';
+import ChatBox from '../components/ChatBox';
 
 export default function ChatPage() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -29,9 +30,6 @@ export default function ChatPage() {
   const [otherTyping, setOtherTyping] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [userStatuses, setUserStatuses] = useState({});
-  const messagesEndRef = useRef(null);
-
-  const navigate = useNavigate();
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -59,7 +57,7 @@ export default function ChatPage() {
         .filter((user) => user.uid !== auth.currentUser?.uid);
       setUsers(list);
       const statuses = {};
-      list.forEach(u => statuses[u.uid] = u.status || 'offline');
+      list.forEach((u) => (statuses[u.uid] = u.status || 'offline'));
       setUserStatuses(statuses);
     });
     return unsubscribe;
@@ -73,19 +71,26 @@ export default function ChatPage() {
     const q = query(messagesRef, orderBy('timestamp'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map((doc) => doc.data());
+      const msgs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setMessages(msgs);
-      scrollToBottom();
 
-      const count = msgs.filter(m =>
-        m.timestamp?.toMillis() > (selectedUser.lastSeen || 0) &&
-        m.senderId === selectedUser.uid
-      ).length;
-      setUnreadCounts(prev => ({ ...prev, [selectedUser.uid]: count }));
+      // Mark seen if the latest message is from the other user
+      const unseenMessages = msgs.filter(
+        (msg) =>
+          msg.senderId === selectedUser.uid &&
+          msg.status !== 'seen'
+      );
+      unseenMessages.forEach((msg) => {
+        const msgRef = doc(db, 'chats', chatId, 'messages', msg.id);
+        updateDoc(msgRef, { status: 'seen' });
+      });
+
+      const count = unseenMessages.length;
+      setUnreadCounts((prev) => ({ ...prev, [selectedUser.uid]: count }));
     });
 
     const typingRef = doc(db, 'typingStatus', chatId);
-    const unsubTyping = onSnapshot(typingRef, snap => {
+    const unsubTyping = onSnapshot(typingRef, (snap) => {
       const data = snap.data() || {};
       setOtherTyping(data[selectedUser.uid] || false);
     });
@@ -93,39 +98,81 @@ export default function ChatPage() {
     return () => {
       unsubscribe();
       unsubTyping();
-      updateDoc(doc(db, 'users', currentUser.uid), { lastSeen: serverTimestamp() });
+      updateDoc(doc(db, 'users', currentUser.uid), {
+        lastSeen: serverTimestamp(),
+      });
       setTyping(false);
     };
   }, [selectedUser]);
 
   const getChatId = (uid1, uid2) => [uid1, uid2].sort().join('_');
 
+  const storeMessageInLocalStorage = (uid1, uid2, msg) => {
+    const chatId = getChatId(uid1, uid2);
+    const existing = JSON.parse(localStorage.getItem(chatId) || '[]');
+    existing.push({
+      senderId: msg.senderId,
+      text: msg.text,
+      timestamp: Date.now(),
+      status: msg.status,
+    });
+    localStorage.setItem(chatId, JSON.stringify(existing));
+  };
+
   const handleSend = async () => {
-    if (!message.trim()) return;
+    if (!message.trim() || !selectedUser) return;
+
     const chatId = getChatId(currentUser.uid, selectedUser.uid);
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    await addDoc(messagesRef, {
+
+    const userMsg = {
       senderId: currentUser.uid,
       text: message,
       timestamp: Timestamp.now(),
-    });
+      status: 'sent',
+    };
+
+    await addDoc(messagesRef, userMsg);
     setMessage('');
     setTyping(false);
+    storeMessageInLocalStorage(currentUser.uid, selectedUser.uid, userMsg);
+
+    if (selectedUser.uid === 'openai-bot') {
+      getBotReply(message, async (botReply) => {
+        const botMsg = {
+          senderId: 'openai-bot',
+          text: botReply,
+          timestamp: Timestamp.now(),
+          status: 'seen',
+        };
+        await addDoc(messagesRef, botMsg);
+        storeMessageInLocalStorage(currentUser.uid, 'openai-bot', botMsg);
+      });
+    }
   };
 
   const setTyping = (typing) => {
     setTypingStatus(typing);
     if (!selectedUser) return;
     const chatId = getChatId(currentUser.uid, selectedUser.uid);
-    setDoc(doc(db, 'typingStatus', chatId), {
-      [currentUser.uid]: typing
-    }, { merge: true });
+    setDoc(
+      doc(db, 'typingStatus', chatId),
+      {
+        [currentUser.uid]: typing,
+      },
+      { merge: true }
+    );
   };
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+  const getBotReply = (userMessage, callback) => {
+    const lower = userMessage.toLowerCase();
+    const replies = {
+      hello: 'Hi there! 👋 How can I help you today?',
+      help: 'I can assist you with general questions or guidance.',
+      bye: 'Goodbye! 😊 Come back anytime.',
+    };
+    const botReply = replies[lower] || `You said: "${userMessage}" — I'm still learning! 🤖`;
+    setTimeout(() => callback(botReply), 1000);
   };
 
   const handleLogout = async () => {
@@ -141,126 +188,32 @@ export default function ChatPage() {
     }
   };
 
-  const filteredUsers = users.filter(user =>
+  const filteredUsers = users.filter((user) =>
     user.name?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="d-flex" style={{ height: '100vh' }}>
-      {/* Sidebar */}
-      <div style={{ width: '300px', backgroundColor: '#f8f9fa', borderRight: '1px solid #ccc' }}>
-        <div className="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
-          <img src="/images/logo.png" alt="Logo" height="30" />
-          <div className="dropdown">
-            <i
-              className="bi bi-three-dots-vertical fs-4"
-              role="button"
-              data-bs-toggle="dropdown"
-              aria-expanded="false"
-            ></i>
-            <ul className="dropdown-menu dropdown-menu-end">
-              <li>
-                <button className="dropdown-item" onClick={() => navigate('/profile')}>Profile</button>
-              </li>
-              <li>
-                <button className="dropdown-item text-danger" onClick={handleLogout}>Logout</button>
-              </li>
-            </ul>
-          </div>
-        </div>
-        <div className="p-2">
-          <input
-            type="text"
-            className="form-control mb-3"
-            placeholder="Search members..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {filteredUsers.map((user) => (
-            <div
-              key={user.uid}
-              className="d-flex align-items-center mb-3 p-2 rounded hover-bg"
-              style={{ cursor: 'pointer' }}
-              onClick={() => setSelectedUser(user)}
-            >
-              <img
-                src={user.imageURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}
-                className="rounded-circle me-2"
-                style={{ height: '40px', width: '40px', objectFit: 'cover' }}
-                alt="user"
-              />
-              <div>
-                <strong>{user.name}</strong>
-                <div className="text-muted small">{user.bio}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Chat Section */}
+      <Sidebar
+        users={filteredUsers}
+        search={search}
+        setSearch={setSearch}
+        handleLogout={handleLogout}
+        setSelectedUser={setSelectedUser}
+      />
       <div className="flex-fill d-flex flex-column">
-        {selectedUser ? (
-          <>
-            <div className="d-flex align-items-center border-bottom px-3 py-2 bg-light">
-              <img
-                src={selectedUser.imageURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}
-                className="rounded-circle me-2"
-                style={{ height: '40px', width: '40px', objectFit: 'cover' }}
-                alt="chat-user"
-              />
-              <div>
-                <strong>{selectedUser.name}</strong>
-                <div className="text-muted small">
-                  {otherTyping ? 'Typing...' : userStatuses[selectedUser.uid] === 'online' ? 'Online' : `Last seen ${moment(selectedUser.lastActive?.toDate()).fromNow()}`}
-                </div>
-              </div>
-            </div>
-            <div className="flex-fill p-3 overflow-auto" style={{ backgroundColor: '#e9ecef' }}>
-              <div className="d-flex flex-column">
-                {messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    className={`mb-2 p-2 rounded shadow-sm d-inline-block ${
-  msg.senderId === currentUser.uid
-    ? 'text-dark align-self-end'
-    : 'bg-white text-start align-self-start'
-}`}
-style={
-  msg.senderId === currentUser.uid
-    ? { backgroundColor: '#dcf8c6' }
-    : {}
-}
-              
-                  >
-                    <div>{msg.text}</div>
-                    <small className="d-block mt-1 text-muted" style={{ fontSize: '0.7rem' }}>
-                      {msg.timestamp?.seconds ? moment(msg.timestamp.toDate()).format('LT') : ''}
-                    </small>
-                  </div>
-                ))}
-                <div ref={messagesEndRef}></div>
-              </div>
-            </div>
-            <div className="d-flex border-top p-2">
-              <input
-                className="form-control me-2"
-                placeholder="Type a message..."
-                value={message}
-                onChange={(e) => {
-                  setMessage(e.target.value);
-                  setTyping(!!e.target.value);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              />
-              <button onClick={handleSend} className="btn btn-success">Send</button>
-            </div>
-          </>
-        ) : (
-          <div className="d-flex justify-content-center align-items-center h-100 text-muted">
-            Select a user to start chatting
-          </div>
-        )}
+        <ChatBox
+          selectedUser={selectedUser}
+          messages={messages}
+          message={message}
+          setMessage={setMessage}
+          handleSend={handleSend}
+          typing={typingStatus}
+          setTyping={setTyping}
+          currentUser={currentUser}
+          otherTyping={otherTyping}
+          userStatuses={userStatuses}
+        />
       </div>
     </div>
   );

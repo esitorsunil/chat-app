@@ -1,0 +1,14 @@
+.message-wrapper {
+  position: relative;
+}
+
+.message-wrapper .menu-icon {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.message-wrapper:hover .menu-icon {
+  visibility: visible;
+  opacity: 1;
+}
